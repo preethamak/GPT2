@@ -1,0 +1,3 @@
+HF_HUB_ENABLE_HF_TRANSFER=1 python gpt2.py
+
+
