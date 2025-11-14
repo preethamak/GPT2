@@ -222,6 +222,7 @@ model.eval()
 model.to('cpu')
 
 import tiktoken
+'''
 enc = tiktoken.get_encoding('gpt2')
 
 with open('input.txt', 'r') as f:
@@ -233,27 +234,71 @@ B, T = 4, 32
 buf = torch.tensor(tokens[:B*T+1]) #(4*32 + 1)
 x = buf[:-1].view(B, T)
 y = buf[1:].view(B, T)
+'''
 
+#1/50257 = 0.0000198...... 
+# log(0.0000198....) = -10.8249....
+# -(-10.8249) => loss = 10.8249....
+
+#------------------------------------------------------
+
+class DataLoaderLite:
+    
+    def __init__(self, B, T):
+        self.B = B
+        self.T = T
+        
+        with open('input.txt', 'r') as f:
+            text = f.read()
+        enc = tiktoken.get_encoding('gpt2')
+        tokens = enc.encode(text)
+        self.tokens = torch.tensor(tokens)
+        print(f'Loaded {len(self.tokens)} tokens')
+        print(f'1 epoch = {len(self.tokens) // (B*T)} batches')
+        
+        self.current_position = 0
+        
+    def next_batch(self):
+        B = self.B
+        T = self.T
+        buf = self.tokens[self.current_position : self.current_position+(B*T)+1] 
+        x = (buf[:-1]).view(B, T)  #inputs for transformer
+        y = (buf[1:]).view(B, T) #output of the transformer it should predict.
+        
+        #Everytime after completion of one set, advance to next set, But not to skip any tokens, current_position takes care of that.
+        self.current_position += B*T
+        
+        #Set the batch to start if all the training is complete, that is 1 epoch is complete.
+        if self.current_position + (B*T+1) > len(self.tokens):
+            self.current_position = 0
+        return x, y
+    
+#----------------------------------------------
+        
 #get logits:
 model = GPT(GPTConfig())
 model.to(device)
 #logits, loss = model(x, y)
 
+train_loader = DataLoaderLite(B=4, T=32)
+
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4) # learning_rate(lr=3e-4) Adam optimizer is different than SGD(stochastic gradient decent method, But does the same work, adam is improved version SGD)
 #Optmizing
 for i in range(50):
+    x, y = train_loader.next_batch()
+    x, y = x.to(device), y.to(device)
     optimizer.zero_grad()
     logits, loss = model(x, y)
     loss.backward()
     optimizer.step()
     print(f'Step {i+1}, Loss : {loss.item()}')   # .item() --> converts tensor value to single float value.
     
+'''This optimization is memorising the tokens, as loss function is approching zero. So we dont need it to 
+memorise things. So we give it different data set, by data loader class up next.'''
 
 print(logits.shape)
 print(loss)
-#1/50257 = 0.0000198...... 
-# log(0.0000198....) = -10.8249....
-# -(-10.8249) => loss = 10.8249....
+
 import sys
 sys.exit(0)
 
