@@ -46,7 +46,7 @@ class CausalSelfAttention(nn.Module):
         #output projection
         y = self.c_proj(y)
         return y
-        
+
 '''Here in attention block, it is also know as multi-headed attention block, many tokens pass through the head parallely and emit the output.
 K - Key vector
 Q - Query vector
@@ -56,7 +56,7 @@ Q and K are multiplied to get the attention values, and then masked the attentio
 value to only the token behind those and not the tokens which appear next.
 Then att value is multiplied with V vector to get the weighted sum, and it is passed as the output of the attention block.
 ###Muliply -> dot product of the matrix.'''
-        
+
 class MLP(nn.Module):
     
     def __init__(self, config):
@@ -98,6 +98,7 @@ class Block(nn.Module):
     then pass through mlp block. attention blok is where the tokens
     communicate. weighted function. In mlp, no communication occurs between
     the tokens'''
+
 @dataclass
 class GPTConfig:
     block_size: int = 1024 #Maximum Sequence length
@@ -110,7 +111,7 @@ class GPT(nn.Module):
     
     def __init__(self, config):
         super().__init__()
-        self.config = config
+        self.config = config  # <-- store config
         
         self.transformer = nn.ModuleDict(dict(
             wte = nn.Embedding(config.vocab_size, config.n_embd), 
@@ -121,19 +122,18 @@ class GPT(nn.Module):
         
         self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias= False)
         
-        
     '''this block is a transformer block which as weights of token embeding(wte, output embedding in Attention is all you need paper), 
     weights of position embeding(wpe, is the positional encoding in the paper), h - hidden, to access the torch elements(the full layer of gray, to access the elements).
     ln_f(normalization, to normalize the output got from the transformer), layer normalization at the end of the transformer. Like this there
     are 12 tranformer block in gpt-124M model. lm_head, This is the linear function at the end of all the tranformers block.
     '''
     
-    def forward(self, idx, targets=None):
+    def forward(self, idx):
         #idx is the shape of (B, T)
         B, T = idx.size()
         assert T <= self.config.block_size, f"Cannot forward seqence of length {T}, block size is only {self.config.block_size}"
         #forward the token and position embeddings
-        pos = torch.arange(0, T, dtype= torch.long, device= idx.device) #Shape (T)
+        pos = torch.arange(0, T, dtype= torch.long, device= idx.device) # <-- fix spelling
         pos_emb = self.transformer.wpe(pos) #position embeddings of shape (T, n_embd)
         tok_emb = self.transformer.wte(idx) #token embeddings of shape (B, T, n_embd)
         x = tok_emb + pos_emb
@@ -143,13 +143,8 @@ class GPT(nn.Module):
             x = block(x)
         #forward the final layer normalization and the classifiers
         x = self.transformer.ln_f(x)
-
         logits = self.lm_head(x) #(B, T, vocab_size)
-        
-        loss = None
-        if targets is not None:    #Using F.cross entropy: It doesnt take multi dimension inputs, so first it flattens all the dimensions to 1D.
-            loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
-        return logits, loss
+        return logits
     '''In this feed forward network, we pass in the index(idx) set the position of the tokens, with batch(B), and tokens(T)
     and use pos_emb to store the position embeddings and tok_emb to store the token embeddings.
     Then we apply the layer normalization and we obtain the probabilities of the next possible token logits, return the logits.'''
@@ -160,7 +155,6 @@ class GPT(nn.Module):
         assert model_type in {'gpt2', 'gpt2-medium', 'gpt2-large', 'gpt2-xl'}
         from transformers import GPT2LMHeadModel
         print("loading weights from pretrained gpt: %s" % model_type)
-
         # n_layer, n_head and n_embd are determined from model_type
         config_args = {
             'gpt2':         dict(n_layer=12, n_head=12, n_embd=768),  # 124M params
@@ -202,7 +196,7 @@ class GPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
-    
+
 #----------------------
 
 '''Auto detect the device.'''
@@ -216,46 +210,17 @@ print(f'Using device: {device}')
 num_return_sequences = 5
 max_length = 30
 
-model = GPT.from_pretrained('gpt2') #--> uses gpt2  model, we want to build it from sctrach.
-#model = GPT(GPTConfig())
+#model = GPT.from_pretrained('gpt2') --> uses gpt2  model, we wnat to build it from sctrach.
+model = GPT(GPTConfig())
 model.eval()
 model.to('cpu')
 
 import tiktoken
 enc = tiktoken.get_encoding('gpt2')
-
-with open('input.txt', 'r') as f:
-    text = f.read()
-text = text[:1000]
-tokens = enc.encode(text)
-B, T = 4, 32
-
-buf = torch.tensor(tokens[:B*T+1]) #(4*32 + 1)
-x = buf[:-1].view(B, T)
-y = buf[1:].view(B, T)
-
-#get logits:
-model = GPT(GPTConfig())
-model.to(device)
-#logits, loss = model(x, y)
-
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4) # learning_rate(lr=3e-4) Adam optimizer is different than SGD(stochastic gradient decent method, But does the same work, adam is improved version SGD)
-#Optmizing
-for i in range(50):
-    optimizer.zero_grad()
-    logits, loss = model(x, y)
-    loss.backward()
-    optimizer.step()
-    print(f'Step {i+1}, Loss : {loss.item()}')   # .item() --> converts tensor value to single float value.
-    
-
-print(logits.shape)
-print(loss)
-#1/50257 = 0.0000198...... 
-# log(0.0000198....) = -10.8249....
-# -(-10.8249) => loss = 10.8249....
-import sys
-sys.exit(0)
+tokens = enc.encode("Hello, I'm a language model,")
+tokens = torch.tensor(tokens, dtype= torch.long) #(8)
+tokens = tokens.unsqueeze(0).repeat(num_return_sequences, 1) #(5, 8)
+x = tokens.to('cpu')
 
 torch.manual_seed(42)
 torch.cuda.manual_seed(42)
